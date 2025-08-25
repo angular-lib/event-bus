@@ -1,63 +1,127 @@
-# EventBus
+# Event Bus
 
-This project was generated using [Angular CLI](https://github.com/angular/angular-cli) version 20.2.0.
+A simple, signal-based event bus for Angular.
 
-## Code scaffolding
+## Features
 
-Angular CLI includes powerful code scaffolding tools. To generate a new component, run:
+- ✅ **Strongly Typed**: Enjoy full type-safety for your events out of the box.
+- 🚀 **Signal-Based**: Built on top of Angular Signals for a modern, reactive architecture.
+- 📡 **Flexible Subscriptions**: Use `on` for callback-based subscriptions or `onToSignal` to directly integrate with the signal ecosystem.
+- 🔄 **Event Transformation**: Transform events with ease using `transform`.
+- 🧹 **Automatic Cleanup**: Subscriptions are automatically cleaned up when the service is destroyed.
 
-```bash
-ng generate component component-name
-```
-
-For a complete list of available schematics (such as `components`, `directives`, or `pipes`), run:
-
-```bash
-ng generate --help
-```
-
-## Building
-
-To build the library, run:
+## Installation
 
 ```bash
-ng build event-bus
+ng add @angular-libs/event-bus
 ```
 
-This command will compile your project, and the build artifacts will be placed in the `dist/` directory.
+## Getting Started
 
-### Publishing the Library
+The `ng add` command will generate an `AppEventBusService` and an `AppEventMap` for you.
 
-Once the project is built, you can publish your library by following these steps:
+**1. Define your events in `app/event-bus/event-bus.models.ts`:**
 
-1. Navigate to the `dist` directory:
-   ```bash
-   cd dist/event-bus
-   ```
-
-2. Run the `npm publish` command to publish your library to the npm registry:
-   ```bash
-   npm publish
-   ```
-
-## Running unit tests
-
-To execute unit tests with the [Karma](https://karma-runner.github.io) test runner, use the following command:
-
-```bash
-ng test
+```typescript
+export interface AppEventMap {
+  "user:login": { userId: string };
+  "user:logout": { userId: string };
+  "cart:item-added": { itemId: string; quantity: number };
+}
 ```
 
-## Running end-to-end tests
+**2. Use the `AppEventBusService` in your components and services:**
 
-For end-to-end (e2e) testing, run:
+```typescript
+import { Component } from "@angular/core";
+import { AppEventBusService } from "../event-bus/app-event-bus.service";
 
-```bash
-ng e2e
+@Component({
+  selector: "app-login",
+  template: `<button (click)="login()">Login</button>`,
+})
+export class LoginComponent {
+  constructor(private eventBus: AppEventBusService) {}
+
+  login() {
+    this.eventBus.emit("user:login", { userId: "123" });
+  }
+}
 ```
 
-Angular CLI does not come with an end-to-end testing framework by default. You can choose one that suits your needs.
+## API
 
-## Additional Resources
+- **`emit(key, payload)`**: Emits an event with a given key and payload.
+- **`on(key, options)`**: Subscribes to an event. Returns a function to unsubscribe.
+- **`onToSignal(key, options)`**: Creates a signal that emits the payload of an event.
+- **`latest(key)`**: Gets the latest event for a given key, including metadata.
+- **`combineLatest(keys, options)`**: Creates a signal that emits an array of the latest values of multiple events.
+- **`clearSubscriptions()`**: Clears all subscriptions from the event bus.
 
-For more information on using the Angular CLI, including detailed command references, visit the [Angular CLI Overview and Command Reference](https://angular.dev/tools/cli) page.
+### Combined Example
+
+Here's a more complete example demonstrating how to use the different API methods together in a component.
+
+```typescript
+import { Component, OnDestroy, computed } from "@angular/core";
+import { AppEventBusService } from "../event-bus/app-event-bus.service";
+
+@Component({
+  selector: "app-user-status",
+  template: `
+    <button (click)="login()">Login</button>
+    <button (click)="logout()">Logout</button>
+    <button (click)="addToCart()">Add to Cart</button>
+    <p>{{ welcomeMessage() }}</p>
+    <p>{{ cartStatus() }}</p>
+  `,
+})
+export class UserStatusComponent implements OnDestroy {
+  private cartSubscription: () => void;
+
+  // 1. Create signals from events
+  private userLoginSignal = this.eventBus.onToSignal("user:login");
+
+  // 2. Use `computed` for derived state
+  welcomeMessage = computed(() => {
+    const loginEvent = this.userLoginSignal();
+    return loginEvent ? `Welcome, ${loginEvent.payload.userId}!` : "Please log in.";
+  });
+
+  constructor(private eventBus: AppEventBusService) {
+    // 3. Use `once` for one-time side-effects that don't need cleanup
+    this.eventBus.once("user:login", {
+      callback: (payload) => console.log("User logged in for the first time:", payload.userId),
+    });
+
+    // 4. Use `on` for continuous side-effects and remember to cleanup
+    this.cartSubscription = this.eventBus.on("cart:item-added", {
+      callback: (payload) => {
+        console.log("Item added to cart:", payload);
+        const lastLoginEvent = this.eventBus.latest("user:login");
+        if (lastLoginEvent) {
+          console.log(`User ${lastLoginEvent.payload.userId} was logged in when item was added.`);
+        }
+      },
+    });
+  }
+
+  // 5. Emit events
+  login() {
+    this.eventBus.emit("user:login", { userId: "42" });
+  }
+
+  logout() {
+    this.eventBus.emit("user:logout", { userId: "42" });
+  }
+
+  addToCart() {
+    this.eventBus.emit("cart:item-added", { itemId: "abc", quantity: 1 });
+  }
+
+  // 6. Clean up subscriptions
+  ngOnDestroy() {
+    this.cartSubscription();
+  }
+}
+```

@@ -5,6 +5,7 @@
     "ng": "ng",
     "start": "ng serve",
     "build": "ng build",
+    "build:schematics": "tsc -p projects/angular-libs/event-bus/schematics/tsconfig.json",
     "watch": "ng build --watch --configuration development",
     "test": "ng test"
   },
@@ -30,6 +31,7 @@
     "tslib": "^2.3.0"
   },
   "devDependencies": {
+    "@angular-devkit/schematics": "^20.2.0",
     "@angular/build": "^20.2.0",
     "@angular/cli": "^20.1.4",
     "@angular/compiler-cli": "^20.1.0",
