@@ -8,76 +8,83 @@ import {
   signal,
   Signal,
 } from '@angular/core';
-
-// --- PUBLIC INTERFACES ---
-
-/**
- * Base configuration for transforming an event's payload.
- * @template TPayload The type of the original event payload.
- * @template TTransformed The type of the transformed payload.
- */
-export interface TransformOptions<TPayload, TTransformed> {
-  transform?: (payload: TPayload) => TTransformed;
-}
+import {
+  CombineLatestOptions,
+  CombineLatestSource,
+  BusEvent,
+  SubscriptionOptions,
+  TransformedPayloads,
+  TransformOptions,
+} from './event-bus.models';
 
 /**
- * Configuration for the callback-based `on` and `once` methods.
- */
-export interface SubscriptionOptions<TPayload, TTransformed>
-  extends TransformOptions<TPayload, TTransformed> {
-  callback: (payload: TTransformed) => void | Promise<void>;
-}
-
-/**
- * Defines a single event source for `combineLatest` methods.
- */
-export interface CombineLatestSource<TPayload = any, TTransformed = TPayload>
-  extends TransformOptions<TPayload, TTransformed> {
-  key: string;
-}
-
-/**
- * Configuration for the callback-based `combineLatest` method.
- */
-export interface CombineLatestOptions<
-  TSources extends readonly CombineLatestSource[]
-> {
-  sources: TSources;
-  callback: (payloads: TransformedPayloads<TSources>) => void | Promise<void>;
-}
-
-// --- INTERNAL TYPES ---
-
-interface HubEvent<TPayload> {
-  key: string;
-  payload: TPayload;
-  timestamp: number;
-}
-
-type TransformedPayloads<TSources extends readonly CombineLatestSource[]> = {
-  [K in keyof TSources]: TSources[K] extends CombineLatestSource<
-    any,
-    infer TTransformed
-  >
-    ? TTransformed
-    : never;
-};
-
-/**
- * A generic, base EventBusService class.
- * It is NOT provided in the root directly. Instead, extend this class in your application.
- * @template TEventMap A map of event keys to payload types (e.g., { 'user:login': { id: number } }).
+ * A generic, signal-based event bus service.
+ * It is not provided in the root directly. Instead, extend this class in your application
+ * and provide it there. This allows you to have a typed event bus.
+ *
+ * @example
+ * ```typescript
+ * // 1. Define your event map
+ * interface AppEventMap {
+ *   'user:login': { userId: string };
+ *   'user:logout': void;
+ * }
+ *
+ * // 2. Create a typed EventBusService
+ * @Injectable({ providedIn: 'root' })
+ * export class AppEventBusService extends EventBusService<AppEventMap> {}
+ *
+ * // 3. Use it in your components or services
+ * export class MyComponent {
+ *   constructor(private eventBus: AppEventBusService) {
+ *     this.eventBus.on('user:login', {
+ *       callback: (payload) => console.log('User logged in:', payload.userId),
+ *     });
+ *
+ *     this.eventBus.emit('user:login', { userId: '123' });
+ *   }
+ * }
+ * ```
+ *
+ * @template TEventMap A map of event keys to payload types (e.g., `{ 'user:login': { userId: string } }`).
  */
 @Injectable()
 export class EventBusService<TEventMap extends {}> implements OnDestroy {
   private readonly NOT_EMITTED = Symbol('NOT_EMITTED');
   private events = new Map<string, WritableSignal<any>>();
-  private effects: EffectRef[] = [];
+  private effects = new Map<string, EffectRef[]>();
 
   ngOnDestroy(): void {
-    this.effects.forEach((eff) => eff.destroy());
-    this.effects = [];
+    this.clearSubscriptions();
     this.events.clear();
+  }
+
+  /**
+   * Clears all subscriptions from the event bus.
+   */
+  clearSubscriptions(): void {
+    this.effects.forEach((effects) => effects.forEach((eff) => eff.destroy()));
+    this.effects.clear();
+  }
+
+  private addEffect(key: string, effect: EffectRef): () => void {
+    if (!this.effects.has(key)) {
+      this.effects.set(key, []);
+    }
+    this.effects.get(key)!.push(effect);
+    return () => {
+      effect.destroy();
+      const keyEffects = this.effects.get(key);
+      if (keyEffects) {
+        const index = keyEffects.indexOf(effect);
+        if (index > -1) {
+          keyEffects.splice(index, 1);
+        }
+        if (keyEffects.length === 0) {
+          this.effects.delete(key);
+        }
+      }
+    };
   }
 
   private getSignal<TData = any>(key: string): WritableSignal<TData | symbol> {
@@ -87,40 +94,59 @@ export class EventBusService<TEventMap extends {}> implements OnDestroy {
     return this.events.get(key)! as WritableSignal<TData | symbol>;
   }
 
+  /**
+   * Emits an event.
+   */
   emit<K extends keyof TEventMap>(key: K, payload: TEventMap[K]): void {
-    const event: HubEvent<TEventMap[K]> = {
+    const event: BusEvent<TEventMap[K]> = {
       key: key as string,
       payload,
       timestamp: Date.now(),
     };
-    this.getSignal<HubEvent<TEventMap[K]>>(key as string).set(event);
+    this.getSignal<BusEvent<TEventMap[K]>>(key as string).set(event);
   }
 
+  /**
+   * Unsubscribes from all subscriptions for a given event.
+   */
+  unsubscribe<K extends keyof TEventMap>(key: K): void {
+    const keyEffects = this.effects.get(key as string);
+    if (keyEffects) {
+      keyEffects.forEach((eff) => eff.destroy());
+      this.effects.delete(key as string);
+    }
+  }
+
+  /**
+   * Gets the latest event for a given key.
+   */
   latest<K extends keyof TEventMap>(
     key: K
-  ): HubEvent<TEventMap[K]> | undefined {
-    const signalValue = this.getSignal<HubEvent<TEventMap[K]>>(key as string)();
+  ): BusEvent<TEventMap[K]> | undefined {
+    const signalValue = this.getSignal<BusEvent<TEventMap[K]>>(key as string)();
     return signalValue === this.NOT_EMITTED
       ? undefined
-      : (signalValue as HubEvent<TEventMap[K]>);
+      : (signalValue as BusEvent<TEventMap[K]>);
   }
 
+  /**  Creates a signal that emits the payload of an event. */
   onToSignal<K extends keyof TEventMap, TTransformed = TEventMap[K]>(
     key: K,
     options?: TransformOptions<TEventMap[K], TTransformed>
   ): Signal<TTransformed | undefined> {
     return computed(() => {
-      const value = this.getSignal<HubEvent<TEventMap[K]>>(key as string)();
+      const value = this.getSignal<BusEvent<TEventMap[K]>>(key as string)();
       if (value === this.NOT_EMITTED) {
         return undefined;
       }
-      const hubEvent = value as HubEvent<TEventMap[K]>;
+      const hubEvent = value as BusEvent<TEventMap[K]>;
       return options?.transform
         ? options.transform(hubEvent.payload)
         : (hubEvent.payload as unknown as TTransformed);
     });
   }
 
+  /** Subscribes to an event.*/
   on<K extends keyof TEventMap, TTransformed = TEventMap[K]>(
     key: K,
     options: SubscriptionOptions<TEventMap[K], TTransformed>
@@ -137,16 +163,12 @@ export class EventBusService<TEventMap extends {}> implements OnDestroy {
         }
       }
     });
-    this.effects.push(eff);
-    return () => {
-      eff.destroy();
-      const index = this.effects.indexOf(eff);
-      if (index > -1) {
-        this.effects.splice(index, 1);
-      }
-    };
+    return this.addEffect(key as string, eff);
   }
 
+  /**
+   * Subscribes to an event for one emission.
+   */
   once<K extends keyof TEventMap, TTransformed = TEventMap[K]>(
     key: K,
     options: SubscriptionOptions<TEventMap[K], TTransformed>
@@ -172,6 +194,9 @@ export class EventBusService<TEventMap extends {}> implements OnDestroy {
     return unsubscribe;
   }
 
+  /**
+   * Combines the latest values of multiple events into a signal.
+   */
   combineLatestToSignal<const TSources extends readonly CombineLatestSource[]>(
     sources: TSources
   ): Signal<TransformedPayloads<TSources> | undefined> {
@@ -180,7 +205,7 @@ export class EventBusService<TEventMap extends {}> implements OnDestroy {
       if (values.some((v) => v === this.NOT_EMITTED)) {
         return undefined;
       }
-      const hubEvents = values as HubEvent<any>[];
+      const hubEvents = values as BusEvent<any>[];
       return hubEvents.map((hubEvent, i) => {
         const source = sources[i];
         return source.transform
@@ -190,6 +215,9 @@ export class EventBusService<TEventMap extends {}> implements OnDestroy {
     });
   }
 
+  /**
+   * Subscribes to the combination of the latest values of multiple events.
+   */
   combineLatest<const TSources extends readonly CombineLatestSource[]>(
     options: CombineLatestOptions<TSources>
   ): () => void {
@@ -210,13 +238,13 @@ export class EventBusService<TEventMap extends {}> implements OnDestroy {
         }
       }
     });
-    this.effects.push(eff);
+
+    const unsubscribes = sources.map((s) =>
+      this.addEffect(s.key as string, eff)
+    );
+
     return () => {
-      eff.destroy();
-      const index = this.effects.indexOf(eff);
-      if (index > -1) {
-        this.effects.splice(index, 1);
-      }
+      unsubscribes.forEach((u) => u());
     };
   }
 }
