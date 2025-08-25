@@ -7,6 +7,9 @@ import {
   EffectRef,
   signal,
   Signal,
+  inject,
+  runInInjectionContext,
+  EnvironmentInjector,
 } from '@angular/core';
 import {
   CombineLatestOptions,
@@ -51,8 +54,20 @@ import {
 @Injectable()
 export class EventBusService<TEventMap extends {}> implements OnDestroy {
   private readonly NOT_EMITTED = Symbol('NOT_EMITTED');
+  // capture the injector at construction time so we can create effects
+  // in the library's injection context even when `on` is called from
+  // user code outside an injection context.
+  private injector: EnvironmentInjector;
   private events = new Map<string, WritableSignal<any>>();
   private effects = new Map<string, EffectRef[]>();
+
+  constructor(injector?: EnvironmentInjector) {
+    this.injector =
+      injector ?? inject(EnvironmentInjector, { optional: true })!;
+    if (!this.injector) {
+      throw new Error('EventBusService requires an Angular injection context.');
+    }
+  }
 
   ngOnDestroy(): void {
     this.clearSubscriptions();
@@ -151,18 +166,36 @@ export class EventBusService<TEventMap extends {}> implements OnDestroy {
     key: K,
     options: SubscriptionOptions<TEventMap[K], TTransformed>
   ): () => void {
-    const eventSignal = this.onToSignal(key, { transform: options.transform });
-    const eff = effect(() => {
-      const payload = eventSignal();
-      if (payload !== undefined) {
-        const result = options.callback(payload);
-        if (result instanceof Promise) {
-          result.catch((error) =>
+    const { callback, transform } = options;
+    const create = () =>
+      effect(() => {
+        // Read the raw BusEvent signal so we can detect emissions even when
+        // the payload is `undefined`.
+        const raw = this.getSignal<BusEvent<TEventMap[K]>>(key as string)();
+        if (raw === this.NOT_EMITTED) return;
+
+        const busEvent = raw as BusEvent<TEventMap[K]>;
+        const transformedPayload = transform
+          ? transform(busEvent.payload as TEventMap[K])
+          : (busEvent.payload as unknown as TTransformed);
+
+        const eventToDispatch: BusEvent<TTransformed> = {
+          key: busEvent.key,
+          timestamp: busEvent.timestamp,
+          payload: transformedPayload,
+        };
+
+        try {
+          const result = callback(eventToDispatch);
+          Promise.resolve(result).catch((error) =>
             console.error(`Error in callback for event ${String(key)}:`, error)
           );
+        } catch (error) {
+          console.error(`Error in callback for event ${String(key)}:`, error);
         }
-      }
-    });
+      });
+
+    const eff = runInInjectionContext(this.injector, create);
     return this.addEffect(key as string, eff);
   }
 
@@ -174,12 +207,12 @@ export class EventBusService<TEventMap extends {}> implements OnDestroy {
     options: SubscriptionOptions<TEventMap[K], TTransformed>
   ): () => void {
     let unsubscribe: () => void;
-    const oneTimeCallback = async (payload: TTransformed) => {
+    const oneTimeCallback = async (event: BusEvent<TTransformed>) => {
       if (unsubscribe) {
         unsubscribe();
       }
       try {
-        await options.callback(payload);
+        await options.callback(event);
       } catch (error) {
         console.error(
           `Error in once callback for event ${String(key)}:`,
@@ -190,7 +223,7 @@ export class EventBusService<TEventMap extends {}> implements OnDestroy {
     unsubscribe = this.on(key, {
       callback: oneTimeCallback,
       transform: options.transform,
-    });
+    } as any);
     return unsubscribe;
   }
 
@@ -223,28 +256,44 @@ export class EventBusService<TEventMap extends {}> implements OnDestroy {
   ): () => void {
     const { sources, callback } = options;
     const combinedSignal = this.combineLatestToSignal(sources);
-    const eff = effect(() => {
-      const payloads = combinedSignal();
-      if (payloads !== undefined) {
-        const result = callback(payloads);
-        if (result instanceof Promise) {
-          const keys = sources.map((s) => s.key).join(', ');
-          result.catch((error) =>
-            console.error(
-              `Error in combineLatest callback for events ${keys}:`,
-              error
-            )
-          );
-        }
-      }
-    });
+    const create = () =>
+      effect(() => {
+        const payloads = combinedSignal();
+        if (payloads !== undefined) {
+          // Build BusEvent<TTransformed>[] matching sources order
+          const events = payloads.map((payload, i) => ({
+            key: sources[i].key,
+            timestamp: Date.now(),
+            payload,
+          })) as any;
 
-    const unsubscribes = sources.map((s) =>
-      this.addEffect(s.key as string, eff)
-    );
+          const result = callback(events);
+          if (result instanceof Promise) {
+            const keys = sources.map((s) => s.key).join(', ');
+            result.catch((error) =>
+              console.error(
+                `Error in combineLatest callback for events ${keys}:`,
+                error
+              )
+            );
+          }
+        }
+      });
+
+    const eff = runInInjectionContext(this.injector, create);
+
+    // register the effect under a single composite key so destroying is done once
+    const compositeKey = `__combine__:${sources
+      .map((s) => s.key)
+      .join('|')}:${Date.now()}:${Math.random()}`;
+    this.addEffect(compositeKey, eff);
 
     return () => {
-      unsubscribes.forEach((u) => u());
+      const remove = this.effects.get(compositeKey);
+      if (remove) {
+        this.effects.get(compositeKey)!.forEach((e) => e.destroy());
+        this.effects.delete(compositeKey);
+      }
     };
   }
 }

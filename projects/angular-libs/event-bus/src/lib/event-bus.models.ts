@@ -12,7 +12,7 @@ export interface TransformOptions<TPayload, TTransformed> {
  */
 export interface SubscriptionOptions<TPayload, TTransformed>
   extends TransformOptions<TPayload, TTransformed> {
-  callback: (payload: TTransformed) => void | Promise<void>;
+  callback: (event: BusEvent<TTransformed>) => void | Promise<void>;
 }
 
 /**
@@ -30,7 +30,7 @@ export interface CombineLatestOptions<
   TSources extends readonly CombineLatestSource[]
 > {
   sources: TSources;
-  callback: (payloads: TransformedPayloads<TSources>) => void | Promise<void>;
+  callback: (events: TransformedEvents<TSources>) => void | Promise<void>;
 }
 
 // --- INTERNAL TYPES ---
@@ -51,3 +51,17 @@ export type TransformedPayloads<
     ? TTransformed
     : never;
 };
+
+/**
+ * Transforms the CombineLatest sources into an array of BusEvent objects
+ * where each entry is the transformed payload wrapped with key/timestamp.
+ */
+export type TransformedEvents<TSources extends readonly CombineLatestSource[]> =
+  {
+    [K in keyof TSources]: TSources[K] extends CombineLatestSource<
+      infer TPayload,
+      infer TTransformed
+    >
+      ? BusEvent<TTransformed>
+      : never;
+  };
