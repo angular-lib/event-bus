@@ -94,7 +94,7 @@ export class EventBusService<TEventMap extends {}> implements OnDestroy {
 
   /**
    * Resets the stored payload for a single event so it behaves as "not emitted".
-   * Does not remove any subscription effects. Use `unsubscribe` or `clearSubscriptions`
+   * Does not remove any subscription effects. Use `unsubscribe` or `unsubscribeAll`
    * to remove listeners.
    */
   resetEvent<K extends keyof TEventMap>(key: K): void {
@@ -110,7 +110,7 @@ export class EventBusService<TEventMap extends {}> implements OnDestroy {
 
   /**
    * Resets the stored payloads for all events so they behave as "not emitted".
-   * Does not remove any subscription effects. Use `clearSubscriptions` to remove listeners.
+   * Does not remove any subscription effects. Use `unsubscribeAll` to remove listeners.
    */
   resetAllEvents(): void {
     this.events.forEach((sig) => {

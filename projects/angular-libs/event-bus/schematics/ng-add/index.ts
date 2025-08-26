@@ -1,4 +1,9 @@
-import { Rule, SchematicContext, Tree } from '@angular-devkit/schematics';
+import {
+  Rule,
+  SchematicContext,
+  SchematicsException,
+  Tree,
+} from '@angular-devkit/schematics';
 
 export function ngAdd(): Rule {
   return (tree: Tree, context: SchematicContext) => {
@@ -22,7 +27,7 @@ export class AppEventBusService extends EventBusService<AppEventMap> {}
 
     // Create event-bus.models.ts
     const modelsContent = `export interface AppEventMap {
-  'example:event': { message: string };
+  'user:login': { userId: number, userName: string };
 }
 `;
     tree.create(
@@ -35,8 +40,33 @@ export class AppEventBusService extends EventBusService<AppEventMap> {}
 }
 
 function getProject(tree: Tree) {
-  const workspaceContent = tree.read('angular.json')!.toString();
-  const workspace = JSON.parse(workspaceContent);
-  const projectName = workspace.defaultProject;
-  return workspace.projects[projectName];
+  const angularJson = tree.read('angular.json');
+  if (!angularJson) {
+    throw new SchematicsException(
+      'Could not find angular.json in the workspace.'
+    );
+  }
+
+  const workspace = JSON.parse(angularJson.toString());
+  const projects = workspace.projects || {};
+  const defaultProject =
+    workspace.defaultProject ||
+    (workspace.extensions && workspace.extensions.defaultProject);
+
+  // pick provided default or fall back to the first project key
+  const projectName = defaultProject || Object.keys(projects)[0];
+  if (!projectName) {
+    throw new SchematicsException(
+      'Could not determine an Angular project. Add a defaultProject to angular.json or pass --project.'
+    );
+  }
+
+  const project = projects[projectName] || projects[Object.keys(projects)[0]];
+  if (!project) {
+    throw new SchematicsException(
+      `Project "${projectName}" not found in angular.json.`
+    );
+  }
+
+  return project;
 }

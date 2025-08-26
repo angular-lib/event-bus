@@ -3,5 +3,8 @@
   "dest": "../../../dist/angular-libs/event-bus",
   "lib": {
     "entryFile": "src/public-api.ts"
-  }
+  },
+  "assets": [
+    "schematics/**/*"
+  ]
 }

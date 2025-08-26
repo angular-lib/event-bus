@@ -10,7 +10,6 @@ A simple, signal-based event bus for Angular.
 - 🚀 **Signal-Based**: Built on top of Angular Signals for a modern, reactive architecture.
 - 📡 **Flexible Subscriptions**: Use `on` for callback-based subscriptions or `onToSignal` to directly integrate with the signal ecosystem.
 - 🔄 **Event Transformation**: Pass a `transform` function in subscription/options (for `on`, `once`, `onToSignal`, and combine sources) to map payloads.
-- 🧹 **Automatic Cleanup**: Subscriptions registered by the service are automatically destroyed when the service is torn down (ngOnDestroy). Use `clearSubscriptions()` or `unsubscribe(key)` for manual cleanup if needed.
 - 🧹 **Automatic Cleanup**: Subscriptions registered by the service are automatically destroyed when the service is torn down (ngOnDestroy). Use `unsubscribeAll()` or `unsubscribe(key)` for manual cleanup if needed.
 
 ## Installation
