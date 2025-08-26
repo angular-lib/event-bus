@@ -112,6 +112,8 @@ export class UserStatusComponent implements OnDestroy {
           console.log(`User ${lastLoginEvent.payload.userId} was logged in when item was added.`);
         }
       },
+      // unsubscribe on `user:logout` event
+      unsubscribeOn: "user:logout",
     });
   }
 
@@ -130,9 +132,10 @@ export class UserStatusComponent implements OnDestroy {
 
   // 6. Clean up subscriptions
   ngOnDestroy() {
-    // manually unsubscribe the cart handler (other subscriptions created via the service
-    // will be destroyed automatically when the service is torn down)
+    // manually unsubscribe the cart handler.
     this.cartSubscription();
+    // Or globally unsubscribe => this.eventBus.unsubscribe('cart:item-added');
+    // (other subscriptions created via the service will be destroyed automatically when the service is torn down)
   }
 }
 ```

@@ -10,6 +10,7 @@ import {
   inject,
   runInInjectionContext,
   EnvironmentInjector,
+  DestroyRef,
 } from '@angular/core';
 import {
   CombineLatestOptions,
@@ -167,36 +168,125 @@ export class EventBusService<TEventMap extends {}> implements OnDestroy {
     options: SubscriptionOptions<TEventMap[K], TTransformed>
   ): () => void {
     const { callback, transform } = options;
-    const create = () =>
+    const keyStr = String(key);
+
+    // small dispatcher that runs the callback with transformed payload and logs errors
+    const dispatch = (busEvent: BusEvent<TEventMap[K]>) => {
+      const { key, timestamp, payload } = busEvent;
+      const transformed = transform
+        ? transform(payload as TEventMap[K])
+        : (payload as unknown as TTransformed);
+
+      const evt = { key, timestamp, payload: transformed };
+
+      try {
+        const res = callback(evt);
+        Promise.resolve(res).catch((err) =>
+          console.error(`Error in callback for event ${keyStr}:`, err)
+        );
+      } catch (err) {
+        console.error(`Error in callback for event ${keyStr}:`, err);
+      }
+    };
+
+    // main effect factory
+    const createMainEffect = () =>
       effect(() => {
-        // Read the raw BusEvent signal so we can detect emissions even when
-        // the payload is `undefined`.
-        const raw = this.getSignal<BusEvent<TEventMap[K]>>(key as string)();
+        const raw = this.getSignal<BusEvent<TEventMap[K]>>(keyStr)();
         if (raw === this.NOT_EMITTED) return;
-
-        const busEvent = raw as BusEvent<TEventMap[K]>;
-        const transformedPayload = transform
-          ? transform(busEvent.payload as TEventMap[K])
-          : (busEvent.payload as unknown as TTransformed);
-
-        const eventToDispatch: BusEvent<TTransformed> = {
-          key: busEvent.key,
-          timestamp: busEvent.timestamp,
-          payload: transformedPayload,
-        };
-
-        try {
-          const result = callback(eventToDispatch);
-          Promise.resolve(result).catch((error) =>
-            console.error(`Error in callback for event ${String(key)}:`, error)
-          );
-        } catch (error) {
-          console.error(`Error in callback for event ${String(key)}:`, error);
-        }
+        dispatch(raw as BusEvent<TEventMap[K]>);
       });
 
-    const eff = runInInjectionContext(this.injector, create);
-    return this.addEffect(key as string, eff);
+    let removeMain: (() => void) | null = null;
+    let removeTracker: (() => void) | null = null;
+    let destroyedBeforeCreate = false;
+
+    const removeBoth = () => {
+      removeMain?.();
+      removeTracker?.();
+    };
+
+    // lightweight tracker factory for unsubscribeOn tokens
+    const makeTracker = (token: any) => {
+      if (!token) return;
+
+      // DestroyRef-like
+      if (typeof token.onDestroy === 'function') {
+        (token as DestroyRef).onDestroy(removeBoth);
+        return;
+      }
+
+      // event key or keys
+      if (typeof token === 'string' || Array.isArray(token)) {
+        const keys = Array.isArray(token) ? token : [token];
+        const initial = keys.map((k) => this.getSignal(k)());
+
+        const eff = runInInjectionContext(this.injector, () =>
+          effect(() => {
+            for (let i = 0; i < keys.length; i++) {
+              if (
+                initial[i] === this.NOT_EMITTED &&
+                this.getSignal(keys[i])() !== this.NOT_EMITTED
+              ) {
+                removeBoth();
+                break;
+              }
+            }
+          })
+        );
+
+        const effectKey = `__track__:${keys.join(
+          '|'
+        )}:${keyStr}:${Date.now()}:${Math.random()}`;
+        removeTracker = this.addEffect(effectKey, eff);
+        return;
+      }
+
+      // assume Signal-like
+      const eff = runInInjectionContext(this.injector, () =>
+        effect(
+          () => {
+            if ((token as Signal<any>)()) removeBoth();
+          },
+          { allowSignalWrites: true }
+        )
+      );
+      const effectKey = `__track__:signal:${keyStr}:${Date.now()}:${Math.random()}`;
+      removeTracker = this.addEffect(effectKey, eff);
+    };
+
+    // create main effect in the captured injector (outside caller reactive context)
+    Promise.resolve().then(() => {
+      const effRef = runInInjectionContext(this.injector, createMainEffect);
+      removeMain = this.addEffect(keyStr, effRef);
+
+      if (destroyedBeforeCreate) {
+        // caller unsubscribed synchronously before effect was created
+        removeMain();
+        removeMain = null;
+        return;
+      }
+
+      if (options.unsubscribeOn) {
+        makeTracker(options.unsubscribeOn as any);
+      }
+    });
+
+    // synchronous unsubscribe
+    const unsubscribe = () => {
+      if (removeMain) {
+        removeMain();
+      } else {
+        destroyedBeforeCreate = true;
+      }
+
+      if (removeTracker) {
+        removeTracker();
+        removeTracker = null;
+      }
+    };
+
+    return unsubscribe;
   }
 
   /**

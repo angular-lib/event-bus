@@ -1,12 +1,12 @@
 {
   "name": "@angular-libs/event-bus",
-  "version": "0.0.1-beta.4",
+  "version": "0.0.1-beta.7",
   "publishConfig": {
     "access": "public"
   },
   "peerDependencies": {
-    "@angular/common": "^18.0.0",
-    "@angular/core": "^18.0.0"
+    "@angular/common": ">=18.0.0",
+    "@angular/core": ">=18.0.0"
   },
   "dependencies": {
     "tslib": "^2.3.0"

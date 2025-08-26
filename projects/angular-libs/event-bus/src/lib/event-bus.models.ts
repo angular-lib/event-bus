@@ -1,9 +1,12 @@
+import { DestroyRef, Signal } from '@angular/core';
+
 /**
  * Base configuration for transforming an event's payload.
  * @template TPayload The type of the original event payload.
  * @template TTransformed The type of the transformed payload.
  */
 export interface TransformOptions<TPayload, TTransformed> {
+  /** Transform the event payload. */
   transform?: (payload: TPayload) => TTransformed;
 }
 
@@ -12,7 +15,10 @@ export interface TransformOptions<TPayload, TTransformed> {
  */
 export interface SubscriptionOptions<TPayload, TTransformed>
   extends TransformOptions<TPayload, TTransformed> {
+  /** Unsubscribe from the event when this signal is truthy, or DestroyRef, or when another event key(s) has fired. */
   callback: (event: BusEvent<TTransformed>) => void | Promise<void>;
+  /** Unsubscribe from the event when this signal is truthy or when the component is destroyed. */
+  unsubscribeOn?: DestroyRef | Signal<any> | string | string[];
 }
 
 /**
@@ -33,13 +39,16 @@ export interface CombineLatestOptions<
   callback: (events: TransformedEvents<TSources>) => void | Promise<void>;
 }
 
-// --- INTERNAL TYPES ---
-
 export interface BusEvent<TPayload> {
+  /** The event key. */
   key: string;
+  /** The event payload. */
   payload: TPayload;
+  /** The event timestamp. */
   timestamp: number;
 }
+
+// --- INTERNAL TYPES ---
 
 export type TransformedPayloads<
   TSources extends readonly CombineLatestSource[]
