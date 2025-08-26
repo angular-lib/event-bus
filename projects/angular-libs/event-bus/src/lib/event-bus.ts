@@ -49,8 +49,6 @@ import {
  *   }
  * }
  * ```
- *
- * @template TEventMap A map of event keys to payload types (e.g., `{ 'user:login': { userId: string } }`).
  */
 @Injectable()
 export class EventBusService<TEventMap extends {}> implements OnDestroy {
@@ -71,16 +69,53 @@ export class EventBusService<TEventMap extends {}> implements OnDestroy {
   }
 
   ngOnDestroy(): void {
-    this.clearSubscriptions();
+    this.unsubscribeAll();
     this.events.clear();
   }
 
   /**
-   * Clears all subscriptions from the event bus.
+   * Unsubscribes all listeners from the event bus.
    */
-  clearSubscriptions(): void {
+  unsubscribeAll(): void {
     this.effects.forEach((effects) => effects.forEach((eff) => eff.destroy()));
     this.effects.clear();
+  }
+
+  /**
+   * Unsubscribes from all subscriptions for a given event.
+   */
+  unsubscribe<K extends keyof TEventMap>(key: K): void {
+    const keyEffects = this.effects.get(key as string);
+    if (keyEffects) {
+      keyEffects.forEach((eff) => eff.destroy());
+      this.effects.delete(key as string);
+    }
+  }
+
+  /**
+   * Resets the stored payload for a single event so it behaves as "not emitted".
+   * Does not remove any subscription effects. Use `unsubscribe` or `clearSubscriptions`
+   * to remove listeners.
+   */
+  resetEvent<K extends keyof TEventMap>(key: K): void {
+    const keyStr = String(key);
+    const sig = this.events.get(keyStr) as WritableSignal<any> | undefined;
+    if (sig) {
+      sig.set(this.NOT_EMITTED);
+    } else {
+      // ensure future getSignal reads behave like NOT_EMITTED
+      this.events.set(keyStr, signal(this.NOT_EMITTED));
+    }
+  }
+
+  /**
+   * Resets the stored payloads for all events so they behave as "not emitted".
+   * Does not remove any subscription effects. Use `clearSubscriptions` to remove listeners.
+   */
+  resetAllEvents(): void {
+    this.events.forEach((sig) => {
+      (sig as WritableSignal<any>).set(this.NOT_EMITTED);
+    });
   }
 
   private addEffect(key: string, effect: EffectRef): () => void {
@@ -120,17 +155,6 @@ export class EventBusService<TEventMap extends {}> implements OnDestroy {
       timestamp: Date.now(),
     };
     this.getSignal<BusEvent<TEventMap[K]>>(key as string).set(event);
-  }
-
-  /**
-   * Unsubscribes from all subscriptions for a given event.
-   */
-  unsubscribe<K extends keyof TEventMap>(key: K): void {
-    const keyEffects = this.effects.get(key as string);
-    if (keyEffects) {
-      keyEffects.forEach((eff) => eff.destroy());
-      this.effects.delete(key as string);
-    }
   }
 
   /**

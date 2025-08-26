@@ -11,6 +11,7 @@ A simple, signal-based event bus for Angular.
 - 📡 **Flexible Subscriptions**: Use `on` for callback-based subscriptions or `onToSignal` to directly integrate with the signal ecosystem.
 - 🔄 **Event Transformation**: Pass a `transform` function in subscription/options (for `on`, `once`, `onToSignal`, and combine sources) to map payloads.
 - 🧹 **Automatic Cleanup**: Subscriptions registered by the service are automatically destroyed when the service is torn down (ngOnDestroy). Use `clearSubscriptions()` or `unsubscribe(key)` for manual cleanup if needed.
+- 🧹 **Automatic Cleanup**: Subscriptions registered by the service are automatically destroyed when the service is torn down (ngOnDestroy). Use `unsubscribeAll()` or `unsubscribe(key)` for manual cleanup if needed.
 
 ## Installation
 
@@ -61,7 +62,9 @@ export class LoginComponent {
 - `combineLatestToSignal(sources)`: Returns a Signal of the latest transformed payloads for the provided sources.
 - `combineLatest({ sources, callback })`: Subscribes to combined latest values and calls the callback with an array of BusEvent objects (one per source). Returns an unsubscribe function.
 - `unsubscribe(key)`: Unsubscribe/destroy all subscriptions for a specific event key.
-- `clearSubscriptions()`: Clears all subscriptions from the event bus.
+- `unsubscribeAll()`: Unsubscribe/destroy all subscriptions registered with the event bus (tears down all internal effects).
+- `resetEvent(key)`: Resets the stored payload for a single event so it behaves as if it has never emitted. This does NOT remove subscriptions — it only clears the latest cached value.
+- `resetAllEvents()`: Resets the stored payloads for all events so they behave as if they have never emitted. This does NOT remove subscriptions.
 
 ### Notes on transform
 
