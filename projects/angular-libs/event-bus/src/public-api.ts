@@ -3,4 +3,10 @@
  */
 
 export * from './lib/event-bus';
-export * from './lib/event-bus.models';
+export type {
+  TransformOptions,
+  SubscriptionOptions,
+  CombineLatestSource,
+  CombineLatestOptions,
+  BusEvent,
+} from './lib/event-bus.models';

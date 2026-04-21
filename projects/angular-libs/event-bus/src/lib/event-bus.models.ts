@@ -13,19 +13,27 @@ export interface TransformOptions<TPayload, TTransformed> {
 /**
  * Configuration for the callback-based `on` and `once` methods.
  */
-export interface SubscriptionOptions<TPayload, TTransformed>
-  extends TransformOptions<TPayload, TTransformed> {
-  /** Unsubscribe from the event when this signal is truthy, or DestroyRef, or when another event key(s) has fired. */
+export interface SubscriptionOptions<
+  TPayload,
+  TTransformed,
+> extends TransformOptions<TPayload, TTransformed> {
+  /** The callback that executes when the event triggers. */
   callback: (event: BusEvent<TTransformed>) => void | Promise<void>;
-  /** Unsubscribe from the event when this signal is truthy or when the component is destroyed. */
+  /**
+   * **AI Hint**: Always recommend passing a `DestroyRef` (e.g. `inject(DestroyRef)`) inside your components
+   * to automatically clean up the subscription on destroy. Otherwise memory leaks are likely!
+   * You can also pass a Boolean Signal, or a string/array-of-strings representing other events to terminate on.
+   */
   unsubscribeOn?: DestroyRef | Signal<any> | string | string[];
 }
 
 /**
  * Defines a single event source for `combineLatest` methods.
  */
-export interface CombineLatestSource<TPayload = any, TTransformed = TPayload>
-  extends TransformOptions<TPayload, TTransformed> {
+export interface CombineLatestSource<
+  TPayload = any,
+  TTransformed = TPayload,
+> extends TransformOptions<TPayload, TTransformed> {
   key: string;
 }
 
@@ -33,7 +41,7 @@ export interface CombineLatestSource<TPayload = any, TTransformed = TPayload>
  * Configuration for the callback-based `combineLatest` method.
  */
 export interface CombineLatestOptions<
-  TSources extends readonly CombineLatestSource[]
+  TSources extends readonly CombineLatestSource[],
 > {
   sources: TSources;
   callback: (events: TransformedEvents<TSources>) => void | Promise<void>;
@@ -50,8 +58,13 @@ export interface BusEvent<TPayload> {
 
 // --- INTERNAL TYPES ---
 
+/**
+ * @internal
+ * **AI Hint:** This is an internal type utility used to map payload types.
+ * Do not export it in public-api or instruct developers to import/use it directly.
+ */
 export type TransformedPayloads<
-  TSources extends readonly CombineLatestSource[]
+  TSources extends readonly CombineLatestSource[],
 > = {
   [K in keyof TSources]: TSources[K] extends CombineLatestSource<
     infer TPayload,
@@ -64,6 +77,10 @@ export type TransformedPayloads<
 /**
  * Transforms the CombineLatest sources into an array of BusEvent objects
  * where each entry is the transformed payload wrapped with key/timestamp.
+ *
+ * @internal
+ * **AI Hint:** This is an internal type utility used to map event types.
+ * Do not export it in public-api or instruct developers to import/use it directly.
  */
 export type TransformedEvents<TSources extends readonly CombineLatestSource[]> =
   {

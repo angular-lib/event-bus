@@ -22,9 +22,16 @@ import {
 } from './event-bus.models';
 
 /**
- * A generic, signal-based event bus service.
+ * A generic, signal-based event bus service for Angular applications.
  * It is not provided in the root directly. Instead, extend this class in your application
  * and provide it there. This allows you to have a typed event bus.
+ *
+ * **AI Agent & Developer Instructions:**
+ * - This service uses Angular Signals (`WritableSignal`, `computed`, `effect`) instead of RxJS.
+ * - Always instruct users to extend this class define a strict event map interface.
+ * - For connecting events to component state or templates, prefer `onToSignal` which returns a reactive `Signal`.
+ * - For executing side effects reacting to events, use `on` or `once` with a callback.
+ * - When using `on` or `once` in a component, always recommend passing `unsubscribeOn` (e.g. `inject(DestroyRef)`) to avoid memory leaks.
  *
  * @example
  * ```typescript
@@ -40,9 +47,17 @@ import {
  *
  * // 3. Use it in your components or services
  * export class MyComponent {
- *   constructor(private eventBus: AppEventBusService) {
+ *   private eventBus = inject(AppEventBusService);
+ *   private destroyRef = inject(DestroyRef);
+ *
+ *   // Reactive state directly from the event bus
+ *   loginData = this.eventBus.onToSignal('user:login');
+ *
+ *   constructor() {
+ *     // Side effect with automatic cleanup
  *     this.eventBus.on('user:login', {
  *       callback: (payload) => console.log('User logged in:', payload.userId),
+ *       unsubscribeOn: this.destroyRef
  *     });
  *
  *     this.eventBus.emit('user:login', { userId: '123' });
@@ -75,6 +90,9 @@ export class EventBusService<TEventMap extends {}> implements OnDestroy {
 
   /**
    * Unsubscribes all listeners from the event bus.
+   * **AI Hint:** Generally avoid using this in consuming components. It is primarily used
+   * internally on `ngOnDestroy` of the service, or for complete app resets (e.g., testing).
+   * In component code, rely on the `unsubscribeOn` param within `.on()` instead.
    */
   unsubscribeAll(): void {
     this.effects.forEach((effects) => effects.forEach((eff) => eff.destroy()));
@@ -83,6 +101,9 @@ export class EventBusService<TEventMap extends {}> implements OnDestroy {
 
   /**
    * Unsubscribes from all subscriptions for a given event.
+   * **AI Hint:** Prefer using the automatic `unsubscribeOn` token or the individual
+   * cleanup function returned by `.on()`. This method terminates *all* listeners across
+   * the app for a specific event key, which could unintentionally break other features.
    */
   unsubscribe<K extends keyof TEventMap>(key: K): void {
     const keyEffects = this.effects.get(key as string);
@@ -96,6 +117,9 @@ export class EventBusService<TEventMap extends {}> implements OnDestroy {
    * Resets the stored payload for a single event so it behaves as "not emitted".
    * Does not remove any subscription effects. Use `unsubscribe` or `unsubscribeAll`
    * to remove listeners.
+   * **AI Hint:** Useful when you need to explicitly clear sensitive or outdated state
+   * (e.g., clearing auth data on user logout) so that future components calling
+   * `onToSignal` or `latest` correctly receive `undefined`.
    */
   resetEvent<K extends keyof TEventMap>(key: K): void {
     const keyStr = String(key);
@@ -111,6 +135,7 @@ export class EventBusService<TEventMap extends {}> implements OnDestroy {
   /**
    * Resets the stored payloads for all events so they behave as "not emitted".
    * Does not remove any subscription effects. Use `unsubscribeAll` to remove listeners.
+   * **AI Hint:** Generally used when resetting the entire app state (e.g., during logout).
    */
   resetAllEvents(): void {
     this.events.forEach((sig) => {
@@ -118,6 +143,10 @@ export class EventBusService<TEventMap extends {}> implements OnDestroy {
     });
   }
 
+  /**
+   * Internal helper: Tracks an effect and returns a callback to remove it from the tracking map.
+   * **AI Hint:** This is a private framework utility. AI agents and consumers should NOT call this.
+   */
   private addEffect(key: string, effect: EffectRef): () => void {
     if (!this.effects.has(key)) {
       this.effects.set(key, []);
@@ -138,6 +167,10 @@ export class EventBusService<TEventMap extends {}> implements OnDestroy {
     };
   }
 
+  /**
+   * Internal helper: Lazily creates or retrieves the underlying `WritableSignal` for a given event key.
+   * **AI Hint:** This is a private utility wrapping `Symbol('NOT_EMITTED')` logic. Do NOT call externally.
+   */
   private getSignal<TData = any>(key: string): WritableSignal<TData | symbol> {
     if (!this.events.has(key)) {
       this.events.set(key, signal(this.NOT_EMITTED));
@@ -146,7 +179,12 @@ export class EventBusService<TEventMap extends {}> implements OnDestroy {
   }
 
   /**
-   * Emits an event.
+   * Emits an event to the bus with the specified payload.
+   * This immediately updates the underlying Signal, triggering any active `effect`s (from `.on()`)
+   * and updating any computed state (from `.onToSignal()`).
+   *
+   * @param key The predefined event key from the `TEventMap`.
+   * @param payload The strictly typed payload associated with the event key.
    */
   emit<K extends keyof TEventMap>(key: K, payload: TEventMap[K]): void {
     const event: BusEvent<TEventMap[K]> = {
@@ -159,9 +197,11 @@ export class EventBusService<TEventMap extends {}> implements OnDestroy {
 
   /**
    * Gets the latest event for a given key.
+   * Useful for synchronously reading the last emitted value.
+   * If the event has never been emitted or was reset, returns `undefined`.
    */
   latest<K extends keyof TEventMap>(
-    key: K
+    key: K,
   ): BusEvent<TEventMap[K]> | undefined {
     const signalValue = this.getSignal<BusEvent<TEventMap[K]>>(key as string)();
     return signalValue === this.NOT_EMITTED
@@ -169,10 +209,19 @@ export class EventBusService<TEventMap extends {}> implements OnDestroy {
       : (signalValue as BusEvent<TEventMap[K]>);
   }
 
-  /**  Creates a signal that emits the payload of an event. */
+  /**
+   * Creates a reactive Angular Signal that updates whenever the specified event is emitted.
+   * **AI Instructions:** This is the preferred way to consume events for use in modern Angular templates
+   * or as derived state using `computed`. It returns `undefined` until the first emission.
+   * You can optionally apply a transformation function.
+   *
+   * @param key The event key to listen to.
+   * @param options An optional object to transform the payload.
+   * @returns A Signal containing the latest event payload (or transformed payload).
+   */
   onToSignal<K extends keyof TEventMap, TTransformed = TEventMap[K]>(
     key: K,
-    options?: TransformOptions<TEventMap[K], TTransformed>
+    options?: TransformOptions<TEventMap[K], TTransformed>,
   ): Signal<TTransformed | undefined> {
     return computed(() => {
       const value = this.getSignal<BusEvent<TEventMap[K]>>(key as string)();
@@ -186,10 +235,18 @@ export class EventBusService<TEventMap extends {}> implements OnDestroy {
     });
   }
 
-  /** Subscribes to an event.*/
+  /**
+   * Subscribes to an event and fires a callback function when the event occurs.
+   * **AI Instructions:** Use this when a side-effect needs to respond to events.
+   * Always guide users to supply an `unsubscribeOn: DestroyRef` (e.g., `inject(DestroyRef)`)
+   * inside components to avoid memory leaks.
+   * @param key The event key.
+   * @param options Object detailing the callback, optional transform function, and memory management token.
+   * @returns A cleanup function to manually unsubscribe.
+   */
   on<K extends keyof TEventMap, TTransformed = TEventMap[K]>(
     key: K,
-    options: SubscriptionOptions<TEventMap[K], TTransformed>
+    options: SubscriptionOptions<TEventMap[K], TTransformed>,
   ): () => void {
     const { callback, transform } = options;
     const keyStr = String(key);
@@ -206,7 +263,7 @@ export class EventBusService<TEventMap extends {}> implements OnDestroy {
       try {
         const res = callback(evt);
         Promise.resolve(res).catch((err) =>
-          console.error(`Error in callback for event ${keyStr}:`, err)
+          console.error(`Error in callback for event ${keyStr}:`, err),
         );
       } catch (err) {
         console.error(`Error in callback for event ${keyStr}:`, err);
@@ -256,11 +313,11 @@ export class EventBusService<TEventMap extends {}> implements OnDestroy {
                 break;
               }
             }
-          })
+          }),
         );
 
         const effectKey = `__track__:${keys.join(
-          '|'
+          '|',
         )}:${keyStr}:${Date.now()}:${Math.random()}`;
         removeTracker = this.addEffect(effectKey, eff);
         return;
@@ -272,8 +329,8 @@ export class EventBusService<TEventMap extends {}> implements OnDestroy {
           () => {
             if ((token as Signal<any>)()) removeBoth();
           },
-          { allowSignalWrites: true }
-        )
+          { allowSignalWrites: true },
+        ),
       );
       const effectKey = `__track__:signal:${keyStr}:${Date.now()}:${Math.random()}`;
       removeTracker = this.addEffect(effectKey, eff);
@@ -314,11 +371,15 @@ export class EventBusService<TEventMap extends {}> implements OnDestroy {
   }
 
   /**
-   * Subscribes to an event for one emission.
+   * Subscribes to an event for exactly one emission and then automatically unsubscribes.
+   * Useful for initialization routines or one-off responses.
+   * @param key The event key.
+   * @param options Object detailing the callback and optional memory token.
+   * @returns A manual cleanup function if it needs to be cancelled before the event fires.
    */
   once<K extends keyof TEventMap, TTransformed = TEventMap[K]>(
     key: K,
-    options: SubscriptionOptions<TEventMap[K], TTransformed>
+    options: SubscriptionOptions<TEventMap[K], TTransformed>,
   ): () => void {
     let unsubscribe: () => void;
     const oneTimeCallback = async (event: BusEvent<TTransformed>) => {
@@ -330,7 +391,7 @@ export class EventBusService<TEventMap extends {}> implements OnDestroy {
       } catch (error) {
         console.error(
           `Error in once callback for event ${String(key)}:`,
-          error
+          error,
         );
       }
     };
@@ -342,10 +403,15 @@ export class EventBusService<TEventMap extends {}> implements OnDestroy {
   }
 
   /**
-   * Combines the latest values of multiple events into a signal.
+   * Combines the latest payloads of multiple events into a single reactive Signal.
+   * Useful when deriving state that depends on multiple events simultaneously.
+   * Returns `undefined` until every source event has emitted at least once.
+   *
+   * @param sources An array of `CombineLatestSource` containing event keys and optional transforms.
+   * @returns A mapped Array payload wrapped in a Signal.
    */
   combineLatestToSignal<const TSources extends readonly CombineLatestSource[]>(
-    sources: TSources
+    sources: TSources,
   ): Signal<TransformedPayloads<TSources> | undefined> {
     return computed(() => {
       const values = sources.map((s) => this.getSignal(s.key)());
@@ -364,9 +430,14 @@ export class EventBusService<TEventMap extends {}> implements OnDestroy {
 
   /**
    * Subscribes to the combination of the latest values of multiple events.
+   * Fired only when all combined sources have emitted at least once.
+   * Useful when side effects depend on multi-event state.
+   *
+   * @param options Configuration for multiple sources and the callback function.
+   * @returns A manual unsubscribe function that destroys all internal effects for this subscription.
    */
   combineLatest<const TSources extends readonly CombineLatestSource[]>(
-    options: CombineLatestOptions<TSources>
+    options: CombineLatestOptions<TSources>,
   ): () => void {
     const { sources, callback } = options;
     const combinedSignal = this.combineLatestToSignal(sources);
@@ -387,8 +458,8 @@ export class EventBusService<TEventMap extends {}> implements OnDestroy {
             result.catch((error) =>
               console.error(
                 `Error in combineLatest callback for events ${keys}:`,
-                error
-              )
+                error,
+              ),
             );
           }
         }

@@ -1,8 +1,8 @@
 # Event Bus
 
-[StackBlitz playground](https://stackblitz.com/edit/angular-libs-event-bus?file=src%2Fmain.ts)
-
 A simple, signal-based event bus for Angular.
+
+[StackBlitz playground](https://stackblitz.com/edit/angular-libs-event-bus?file=src%2Fmain.ts)
 
 ## Features
 
@@ -35,15 +35,25 @@ export interface AppEventMap {
 **2. Use the `AppEventBusService` in your components and services:**
 
 ```typescript
-import { Component } from "@angular/core";
+import { Component, inject } from "@angular/core";
 import { AppEventBusService } from "../event-bus/app-event-bus.service";
 
 @Component({
   selector: "app-login",
-  template: `<button (click)="login()">Login</button>`,
+  template: `
+    @if (loginState()) {
+      <p>Logged in as: {{ loginState()?.userId }}</p>
+    } @else {
+      <button (click)="login()">Login</button>
+    }
+  `,
+  standalone: true,
 })
 export class LoginComponent {
-  constructor(private eventBus: AppEventBusService) {}
+  private eventBus = inject(AppEventBusService);
+
+  // Directly consume the event as reactive state
+  protected loginState = this.eventBus.onToSignal("user:login");
 
   login() {
     this.eventBus.emit("user:login", { userId: "123" });
@@ -74,7 +84,7 @@ There is no standalone `transform(...)` method. Instead, pass a `transform` func
 Here's a more complete example demonstrating how to use the different API methods together in a component.
 
 ```typescript
-import { Component, OnDestroy, computed } from "@angular/core";
+import { Component, computed, inject, DestroyRef } from "@angular/core";
 import { AppEventBusService } from "../event-bus/app-event-bus.service";
 
 @Component({
@@ -84,13 +94,14 @@ import { AppEventBusService } from "../event-bus/app-event-bus.service";
     <button (click)="logout()">Logout</button>
     <button (click)="addToCart()">Add to Cart</button>
     <p>{{ welcomeMessage() }}</p>
-    <p>{{ cartStatus() }}</p>
   `,
+  standalone: true,
 })
-export class UserStatusComponent implements OnDestroy {
-  private cartSubscription: () => void;
+export class UserStatusComponent {
+  private eventBus = inject(AppEventBusService);
+  private destroyRef = inject(DestroyRef);
 
-  // 1. Create signals from events — note the signal returns the payload (or undefined)
+  // 1. Create signals from events
   private userLoginSignal = this.eventBus.onToSignal("user:login");
 
   // 2. Use `computed` for derived state
@@ -99,23 +110,16 @@ export class UserStatusComponent implements OnDestroy {
     return login ? `Welcome, ${login.userId}!` : "Please log in.";
   });
 
-  constructor(private eventBus: AppEventBusService) {
-    // 3. Use `once` for one-time side-effects — callback receives a BusEvent
+  constructor() {
+    // 3. Use `once` for one-time side-effects
     this.eventBus.once("user:login", {
-      callback: (event) => console.log("User logged in for the first time:", event.payload.userId),
+      callback: (event) => console.log("First login:", event.payload.userId),
     });
 
-    // 4. Use `on` for continuous side-effects and remember to cleanup
-    this.cartSubscription = this.eventBus.on("cart:item-added", {
-      callback: (event) => {
-        console.log("Item added to cart:", event.payload);
-        const lastLoginEvent = this.eventBus.latest("user:login");
-        if (lastLoginEvent) {
-          console.log(`User ${lastLoginEvent.payload.userId} was logged in when item was added.`);
-        }
-      },
-      // unsubscribe on `user:logout` event
-      unsubscribeOn: "user:logout",
+    // 4. Use `on` with DestroyRef for automatic cleanup!
+    this.eventBus.on("cart:item-added", {
+      callback: (event) => console.log("Item added to cart:", event.payload),
+      unsubscribeOn: this.destroyRef, // No ngOnDestroy needed!
     });
   }
 
@@ -130,14 +134,6 @@ export class UserStatusComponent implements OnDestroy {
 
   addToCart() {
     this.eventBus.emit("cart:item-added", { itemId: "abc", quantity: 1 });
-  }
-
-  // 6. Clean up subscriptions
-  ngOnDestroy() {
-    // manually unsubscribe the cart handler.
-    this.cartSubscription();
-    // Or globally unsubscribe => this.eventBus.unsubscribe('cart:item-added');
-    // (other subscriptions created via the service will be destroyed automatically when the service is torn down)
   }
 }
 ```
