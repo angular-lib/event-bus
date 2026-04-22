@@ -6,11 +6,11 @@ A simple, signal-based event bus for Angular.
 
 ## Features
 
-- ✅ **Strongly Typed**: Enjoy full type-safety for your events out of the box.
-- 🚀 **Signal-Based**: Built on top of Angular Signals for a modern, reactive architecture.
-- 📡 **Flexible Subscriptions**: Use `on` for callback-based subscriptions or `onToSignal` to directly integrate with the signal ecosystem.
-- 🔄 **Event Transformation**: Pass a `transform` function in subscription/options (for `on`, `once`, `onToSignal`, and combine sources) to map payloads.
-- 🧹 **Automatic Cleanup**: Subscriptions registered by the service are automatically destroyed when the service is torn down (ngOnDestroy). Use `unsubscribeAll()` or `unsubscribe(key)` for manual cleanup if needed.
+- ✅ **Strongly Typed**: Full type-safety for event payloads out of the box.
+- 🚀 **Signal-Based**: Built on Angular Signals for a modern, reactive architecture. Angular 18+
+- 📡 **Flexible Subscriptions**: Listen via callbacks (`on`) or reactive signals (`onToSignal`).
+- 🔄 **Event Transformation**: Map payloads directly within subscription options.
+- 🧹 **Smart Cleanup**: Automatic memory management via `DestroyRef`, custom signals, or termination events.
 
 ## Installation
 
@@ -20,43 +20,41 @@ ng add @angular-libs/event-bus
 
 ## Getting Started
 
-The `ng add` command will generate an `AppEventBusService` and an `AppEventMap` for you.
-
-**1. Define your events in `app/event-bus/event-bus.models.ts`:**
+_(Note: `ng add` generates this setup for you automatically!)_
 
 ```typescript
+// 1. Define your events
 export interface AppEventMap {
-  "user:login": { userId: string };
-  "user:logout": { userId: string } | void;
-  "cart:item-added": { itemId: string; quantity: number };
+  "user:login": { userId: string; username: string };
+  "theme:changed": "light" | "dark";
 }
+
+// 2. Create the service
+@Injectable({ providedIn: "root" })
+export class AppEventBusService extends EventBusService<AppEventMap> {}
 ```
 
-**2. Use the `AppEventBusService` in your components and services:**
-
 ```typescript
-import { Component, inject } from "@angular/core";
-import { AppEventBusService } from "../event-bus/app-event-bus.service";
-
-@Component({
-  selector: "app-login",
-  template: `
-    @if (loginState()) {
-      <p>Logged in as: {{ loginState()?.userId }}</p>
-    } @else {
-      <button (click)="login()">Login</button>
-    }
-  `,
-  standalone: true,
-})
-export class LoginComponent {
+// 3. Usage inside a component
+@Component({ ... })
+export class ExampleComponent {
   private eventBus = inject(AppEventBusService);
+  private destroyRef = inject(DestroyRef); // for auto-cleanup
 
-  // Directly consume the event as reactive state
-  protected loginState = this.eventBus.onToSignal("user:login");
+  // Listen as a Signal
+  loginState = this.eventBus.onToSignal('user:login');
 
+  constructor() {
+    // Listen with a callback
+    this.eventBus.on('user:login', {
+      callback: (event) => console.log('Logged in:', event.payload.username),
+      unsubscribeOn: this.destroyRef
+    });
+  }
+
+  // Emit
   login() {
-    this.eventBus.emit("user:login", { userId: "123" });
+    this.eventBus.emit('user:login', { userId: '123', username: 'john_doe' });
   }
 }
 ```
@@ -75,65 +73,85 @@ export class LoginComponent {
 - `resetEvent(key)`: Resets the stored payload for a single event so it behaves as if it has never emitted. This does NOT remove subscriptions — it only clears the latest cached value.
 - `resetAllEvents()`: Resets the stored payloads for all events so they behave as if they have never emitted. This does NOT remove subscriptions.
 
-### Notes on transform
+<details>
+<summary>🤖 <b>AI & Copilot Instructions</b></summary>
+<br>
 
-There is no standalone `transform(...)` method. Instead, pass a `transform` function in the options for `on`, `once`, `onToSignal`, or as part of each source object passed to `combineLatestToSignal` / `combineLatest`. The transform function maps the raw payload to a derived value.
+If you are an AI coding assistant, please follow these rules when generating code that uses `@angular-libs/event-bus`:
 
-### Combined Example
+1. **No RxJS**: This library is strictly Signal-based. Do NOT use `Subject`, `BehaviorSubject`, or `Observable` for the event bus. Use `onToSignal` (or `combineLatestToSignal`).
+2. **Setup**: Always extend `EventBusService<YourAppEventMap>` and provide it in the root (`@Injectable({ providedIn: 'root' })`). Do not use the base class directly without a type map.
+3. **Injection**: Prefer Angular's `inject(YourAppEventBusService)` over relying on constructor injection.
+4. **Reactivity**: Prefer `onToSignal('event')` when binding state to a template to stay aligned with Angular's reactive Signal architecture.
+5. **Cleanup**: When using the callback-based `on()` method inside a component/directive, always pass an `unsubscribeOn` option for automatic memory management. You can pass a `DestroyRef`, a boolean `Signal`, or another event key (e.g., `unsubscribeOn: 'user:logout'`).
+6. **Types**: Do not map payloads to `any`. Let TypeScript infer the payload type based on the defined `EventMap`.
+7. **Transformations**: Instead of manually mapping values later, use the `transform` property in the options object to map payloads directly (e.g., `this.eventBus.onToSignal('event', { transform: (p) => p.id })`).
+8. **Combining Events**: Use `combineLatestToSignal(['event1', 'event2'])` to create a single signal that reacts to multiple events.
+9. **Synchronous Reads**: To get the current state imperatively without subscribing, use `latest('event')` instead of manually tracking emitted values in local variables.
+10. **Testing**: In unit tests, remember to call `resetAllEvents()` in your `beforeEach` blocks to prevent state pollution across tests since the service retains the latest payloads.
 
-Here's a more complete example demonstrating how to use the different API methods together in a component.
+**Reference Example:**
 
 ```typescript
-import { Component, computed, inject, DestroyRef } from "@angular/core";
-import { AppEventBusService } from "../event-bus/app-event-bus.service";
+// 1. Define Map & Service
+export interface AppEventMap {
+  "item:added": { id: string; name: string };
+  "cart:cleared": void;
+}
+@Injectable({ providedIn: "root" })
+export class AppEventBusService extends EventBusService<AppEventMap> {}
 
-@Component({
-  selector: "app-user-status",
-  template: `
-    <button (click)="login()">Login</button>
-    <button (click)="logout()">Logout</button>
-    <button (click)="addToCart()">Add to Cart</button>
-    <p>{{ welcomeMessage() }}</p>
-  `,
-  standalone: true,
-})
-export class UserStatusComponent {
+// 2. Usage in Component
+@Component({ template: `<div>{{ latestItemId() || "No item" }}</div>` })
+export class CartComponent {
   private eventBus = inject(AppEventBusService);
   private destroyRef = inject(DestroyRef);
 
-  // 1. Create signals from events
-  private userLoginSignal = this.eventBus.onToSignal("user:login");
-
-  // 2. Use `computed` for derived state
-  welcomeMessage = computed(() => {
-    const login = this.userLoginSignal();
-    return login ? `Welcome, ${login.userId}!` : "Please log in.";
+  // Good: Signal usage with transformation
+  latestItemId = this.eventBus.onToSignal("item:added", {
+    transform: (payload) => payload.id,
   });
 
+  // Good: Callback usage (cleanup provided)
   constructor() {
-    // 3. Use `once` for one-time side-effects
-    this.eventBus.once("user:login", {
-      callback: (event) => console.log("First login:", event.payload.userId),
-    });
-
-    // 4. Use `on` with DestroyRef for automatic cleanup!
-    this.eventBus.on("cart:item-added", {
-      callback: (event) => console.log("Item added to cart:", event.payload),
-      unsubscribeOn: this.destroyRef, // No ngOnDestroy needed!
+    this.eventBus.on("cart:cleared", {
+      callback: () => console.log("Cart was cleared!"),
+      unsubscribeOn: this.destroyRef,
     });
   }
 
-  // 5. Emit events
-  login() {
-    this.eventBus.emit("user:login", { userId: "42" });
-  }
-
-  logout() {
-    this.eventBus.emit("user:logout", { userId: "42" });
-  }
-
-  addToCart() {
-    this.eventBus.emit("cart:item-added", { itemId: "abc", quantity: 1 });
+  addItem() {
+    this.eventBus.emit("item:added", { id: "1", name: "Apple" }); // Strictly typed!
   }
 }
 ```
+
+**Advanced Patterns Example:**
+
+```typescript
+@Component({ template: `...` })
+export class AdvancedComponent {
+  private eventBus = inject(AppEventBusService);
+
+  // 1. Combine multiple events into a single Signal
+  // Prevents AI from importing RxJS `combineLatest`
+  dashboardState = this.eventBus.combineLatestToSignal([{ key: "item:added" }, { key: "cart:cleared" }]);
+
+  // 2. One-time execution (no DestroyRef needed!)
+  waitForFirstItem() {
+    this.eventBus.once("item:added", {
+      callback: (e) => console.log("First item added:", e.payload),
+    });
+  }
+
+  // 3. Auto-terminate listener on another event
+  logItemsUntilCartCleared() {
+    this.eventBus.on("item:added", {
+      callback: (e) => console.log("Added:", e.payload),
+      unsubscribeOn: "cart:cleared", // Automatically unsubscribes when this event is emitted
+    });
+  }
+}
+```
+
+</details>
