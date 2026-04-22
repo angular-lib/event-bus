@@ -9,7 +9,7 @@ import {
   Signal,
   inject,
   runInInjectionContext,
-  EnvironmentInjector,
+  Injector,
   DestroyRef,
 } from '@angular/core';
 import {
@@ -23,15 +23,14 @@ import {
 
 /**
  * A generic, signal-based event bus service for Angular applications.
- * It is not provided in the root directly. Instead, extend this class in your application
- * and provide it there. This allows you to have a typed event bus.
  *
  * **AI Agent & Developer Instructions:**
  * - This service uses Angular Signals (`WritableSignal`, `computed`, `effect`) instead of RxJS.
- * - Always instruct users to extend this class define a strict event map interface.
+ * - You can inject this directly or extend it to define a strict event map interface.
  * - For connecting events to component state or templates, prefer `onToSignal` which returns a reactive `Signal`.
  * - For executing side effects reacting to events, use `on` or `once` with a callback.
  * - When using `on` or `once` in a component, always recommend passing `unsubscribeOn` (e.g. `inject(DestroyRef)`) to avoid memory leaks.
+ * - Event emissions are synchronous. Do not `await` the `emit()` method.
  *
  * @example
  * ```typescript
@@ -41,47 +40,41 @@ import {
  *   'user:logout': void;
  * }
  *
- * // 2. Create a typed EventBusService
+ * // 2. Create a typed EventBusService for your app
  * @Injectable({ providedIn: 'root' })
  * export class AppEventBusService extends EventBusService<AppEventMap> {}
  *
- * // 3. Use it in your components or services
+ * // 3. Inject and use in your components or services
+ * @Component({ ... })
  * export class MyComponent {
  *   private eventBus = inject(AppEventBusService);
  *   private destroyRef = inject(DestroyRef);
  *
- *   // Reactive state directly from the event bus
+ *   // Get reactive state (Signal) directly from the event bus
  *   loginData = this.eventBus.onToSignal('user:login');
  *
  *   constructor() {
- *     // Side effect with automatic cleanup
+ *     // Execute a side effect with automatic cleanup
  *     this.eventBus.on('user:login', {
- *       callback: (payload) => console.log('User logged in:', payload.userId),
+ *       callback: (event) => console.log('User logged in:', event.payload.userId),
  *       unsubscribeOn: this.destroyRef
  *     });
  *
+ *     // Emit an event
  *     this.eventBus.emit('user:login', { userId: '123' });
  *   }
  * }
  * ```
  */
-@Injectable()
+@Injectable({ providedIn: 'root' })
 export class EventBusService<TEventMap extends {}> implements OnDestroy {
   private readonly NOT_EMITTED = Symbol('NOT_EMITTED');
   // capture the injector at construction time so we can create effects
   // in the library's injection context even when `on` is called from
   // user code outside an injection context.
-  private injector: EnvironmentInjector;
+  private injector = inject(Injector);
   private events = new Map<string, WritableSignal<any>>();
   private effects = new Map<string, EffectRef[]>();
-
-  constructor(injector?: EnvironmentInjector) {
-    this.injector =
-      injector ?? inject(EnvironmentInjector, { optional: true })!;
-    if (!this.injector) {
-      throw new Error('EventBusService requires an Angular injection context.');
-    }
-  }
 
   ngOnDestroy(): void {
     this.unsubscribeAll();
@@ -182,6 +175,8 @@ export class EventBusService<TEventMap extends {}> implements OnDestroy {
    * Emits an event to the bus with the specified payload.
    * This immediately updates the underlying Signal, triggering any active `effect`s (from `.on()`)
    * and updating any computed state (from `.onToSignal()`).
+   *
+   * **AI Hint:** Event emissions are synchronous. Do not `await` this method. Payloads are passed by reference, so do not mutate the payload inside callbacks.
    *
    * @param key The predefined event key from the `TEventMap`.
    * @param payload The strictly typed payload associated with the event key.

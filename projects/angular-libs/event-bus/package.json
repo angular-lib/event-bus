@@ -1,6 +1,6 @@
 {
   "name": "@angular-libs/event-bus",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "A modern, strongly-typed, signal-based event bus service for Angular 18+ applications.",
   "keywords": [
     "angular",
