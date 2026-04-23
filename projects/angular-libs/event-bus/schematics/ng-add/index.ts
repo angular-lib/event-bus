@@ -14,11 +14,11 @@ export function ngAdd(): Rule {
 
     // Create app-event-bus.service.ts
     const serviceContent = `import { Injectable } from '@angular/core';
-import { EventBusService } from '@angular-libs/event-bus';
+import { ALEventBus } from '@angular-libs/event-bus';
 import { AppEventMap } from './event-bus.models';
 
 @Injectable({ providedIn: 'root' })
-export class AppEventBusService extends EventBusService<AppEventMap> {}
+export class AppEventBus extends ALEventBus<AppEventMap> {}
 `;
     tree.create(
       `${projectPath}/app/event-bus/app-event-bus.service.ts`,

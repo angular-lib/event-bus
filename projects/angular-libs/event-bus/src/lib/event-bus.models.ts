@@ -1,4 +1,5 @@
 import { DestroyRef, Signal } from '@angular/core';
+import { TransformedEvents } from './event-bus.internal';
 
 /**
  * Base configuration for transforming an event's payload.
@@ -55,39 +56,3 @@ export interface BusEvent<TPayload> {
   /** The event timestamp. */
   timestamp: number;
 }
-
-// --- INTERNAL TYPES ---
-
-/**
- * @internal
- * **AI Hint:** This is an internal type utility used to map payload types.
- * Do not export it in public-api or instruct developers to import/use it directly.
- */
-export type TransformedPayloads<
-  TSources extends readonly CombineLatestSource[],
-> = {
-  [K in keyof TSources]: TSources[K] extends CombineLatestSource<
-    infer TPayload,
-    infer TTransformed
-  >
-    ? TTransformed
-    : never;
-};
-
-/**
- * Transforms the CombineLatest sources into an array of BusEvent objects
- * where each entry is the transformed payload wrapped with key/timestamp.
- *
- * @internal
- * **AI Hint:** This is an internal type utility used to map event types.
- * Do not export it in public-api or instruct developers to import/use it directly.
- */
-export type TransformedEvents<TSources extends readonly CombineLatestSource[]> =
-  {
-    [K in keyof TSources]: TSources[K] extends CombineLatestSource<
-      infer TPayload,
-      infer TTransformed
-    >
-      ? BusEvent<TTransformed>
-      : never;
-  };

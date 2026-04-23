@@ -1,6 +1,6 @@
 # Event Bus
 
-A simple, signal-based event bus for Angular.
+A type-safe, RxJS-free event bus powered entirely by Angular Signals
 
 [StackBlitz playground](https://stackblitz.com/edit/angular-libs-event-bus?file=src%2Fmain.ts)
 
@@ -31,14 +31,14 @@ export interface AppEventMap {
 
 // 2. Create the service
 @Injectable({ providedIn: "root" })
-export class AppEventBusService extends EventBusService<AppEventMap> {}
+export class AppEventBus extends ALEventBus<AppEventMap> {}
 ```
 
 ```typescript
 // 3. Usage inside a component
 @Component({ ... })
 export class ExampleComponent {
-  private eventBus = inject(AppEventBusService);
+  private eventBus = inject(AppEventBus);
   private destroyRef = inject(DestroyRef); // for auto-cleanup
 
   // Listen as a Signal
@@ -80,8 +80,8 @@ export class ExampleComponent {
 If you are an AI coding assistant, please follow these rules when generating code that uses `@angular-libs/event-bus`:
 
 1. **No RxJS**: This library is strictly Signal-based. Do NOT use `Subject`, `BehaviorSubject`, or `Observable` for the event bus. Use `onToSignal` (or `combineLatestToSignal`).
-2. **Setup**: Always extend `EventBusService<YourAppEventMap>` and provide it in the root (`@Injectable({ providedIn: 'root' })`). Do not use the base class directly without a type map.
-3. **Injection**: Prefer Angular's `inject(YourAppEventBusService)` over relying on constructor injection.
+2. **Setup**: Always extend `ALEventBus<YourAppEventMap>` and provide it in the root (`@Injectable({ providedIn: 'root' })`). Do not use the base class directly without a type map.
+3. **Injection**: Prefer Angular's `inject(YourAppEventBus)` over relying on constructor injection.
 4. **Reactivity**: Prefer `onToSignal('event')` when binding state to a template to stay aligned with Angular's reactive Signal architecture.
 5. **Cleanup**: When using the callback-based `on()` method inside a component/directive, always pass an `unsubscribeOn` option for automatic memory management. You can pass a `DestroyRef`, a boolean `Signal`, or another event key (e.g., `unsubscribeOn: 'user:logout'`).
 6. **Types**: Do not map payloads to `any`. Let TypeScript infer the payload type based on the defined `EventMap`.
@@ -99,12 +99,12 @@ export interface AppEventMap {
   "cart:cleared": void;
 }
 @Injectable({ providedIn: "root" })
-export class AppEventBusService extends EventBusService<AppEventMap> {}
+export class AppEventBus extends ALEventBus<AppEventMap> {}
 
 // 2. Usage in Component
 @Component({ template: `<div>{{ latestItemId() || "No item" }}</div>` })
 export class CartComponent {
-  private eventBus = inject(AppEventBusService);
+  private eventBus = inject(AppEventBus);
   private destroyRef = inject(DestroyRef);
 
   // Good: Signal usage with transformation
@@ -131,7 +131,7 @@ export class CartComponent {
 ```typescript
 @Component({ template: `...` })
 export class AdvancedComponent {
-  private eventBus = inject(AppEventBusService);
+  private eventBus = inject(AppEventBus);
 
   // 1. Combine multiple events into a single Signal
   // Prevents AI from importing RxJS `combineLatest`

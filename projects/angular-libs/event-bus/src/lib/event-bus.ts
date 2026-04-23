@@ -17,9 +17,9 @@ import {
   CombineLatestSource,
   BusEvent,
   SubscriptionOptions,
-  TransformedPayloads,
   TransformOptions,
 } from './event-bus.models';
+import { TransformedPayloads } from './event-bus.internal';
 
 /**
  * A generic, signal-based event bus service for Angular applications.
@@ -40,14 +40,14 @@ import {
  *   'user:logout': void;
  * }
  *
- * // 2. Create a typed EventBusService for your app
+ * // 2. Create a typed ALEventBus for your app
  * @Injectable({ providedIn: 'root' })
- * export class AppEventBusService extends EventBusService<AppEventMap> {}
+ * export class AppEventBus extends ALEventBus<AppEventMap> {}
  *
  * // 3. Inject and use in your components or services
  * @Component({ ... })
  * export class MyComponent {
- *   private eventBus = inject(AppEventBusService);
+ *   private eventBus = inject(AppEventBus);
  *   private destroyRef = inject(DestroyRef);
  *
  *   // Get reactive state (Signal) directly from the event bus
@@ -67,7 +67,7 @@ import {
  * ```
  */
 @Injectable({ providedIn: 'root' })
-export class EventBusService<TEventMap extends {}> implements OnDestroy {
+export class ALEventBus<TEventMap extends {}> implements OnDestroy {
   private readonly NOT_EMITTED = Symbol('NOT_EMITTED');
   // capture the injector at construction time so we can create effects
   // in the library's injection context even when `on` is called from
